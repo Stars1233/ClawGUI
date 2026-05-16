@@ -1,6 +1,4 @@
 set -x
-export CUDA_VISIBLE_DEVICES=5,6,7
-export NCCL_P2P_DISABLE=1
 
 # cd to script directory so relative paths work from any working directory
 cd "$(dirname "$0")"
