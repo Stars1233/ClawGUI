@@ -24,7 +24,9 @@ class UITarsAdapter : ModelAdapter {
         currentApp: String,
         context: List<Map<String, Any?>>,
         lang: String,
+        extraUserImages: List<String>,
     ): List<Map<String, Any?>> {
+        @Suppress("UNUSED_VARIABLE") val ignoredRefs = extraUserImages
         val messages = context.toMutableList()
         if (messages.isEmpty()) {
             val sys = PromptsUitars.systemPrompt(task, lang)

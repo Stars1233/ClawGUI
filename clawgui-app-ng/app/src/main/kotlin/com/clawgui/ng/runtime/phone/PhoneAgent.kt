@@ -62,7 +62,15 @@ class PhoneAgent(
     private var consecutiveFailures = 0
     private var consecutiveWaits = 0
 
-    suspend fun run(task: String): String {
+    /**
+     * Run a task to completion. [userImages] is an optional list of base64-
+     * encoded JPEGs the user attached to the chat turn (e.g. "post this
+     * photo to Weibo with a caption") — they are sent to the VLM **once** on
+     * the first step alongside the screenshot, then preserved in `context`
+     * for the rest of the loop so the model can keep referring back to them
+     * without us re-shipping them every step.
+     */
+    suspend fun run(task: String, userImages: List<String> = emptyList()): String {
         context.clear()
         stepCount = 0
         recentActions.clear()
@@ -71,7 +79,7 @@ class PhoneAgent(
         currentTask = task
         modelClient.adapter.clearHistory()
 
-        var result = executeStep(task, isFirst = true)
+        var result = executeStep(task, isFirst = true, userImages = userImages)
         if (result.finished) return result.message ?: "Task completed"
 
         while (stepCount < agentConfig.maxSteps) {
@@ -81,10 +89,10 @@ class PhoneAgent(
         return "Max steps reached"
     }
 
-    suspend fun step(task: String? = null): StepResult {
+    suspend fun step(task: String? = null, userImages: List<String> = emptyList()): StepResult {
         val isFirst = context.isEmpty()
         require(!isFirst || task != null) { "Task is required for the first step" }
-        return executeStep(task, isFirst)
+        return executeStep(task, isFirst, userImages)
     }
 
     /**
@@ -101,7 +109,7 @@ class PhoneAgent(
      *  3. Returns the first step's result; the caller's outer loop keeps
      *     iterating with bare `step()` after.
      */
-    suspend fun continueTask(task: String): StepResult {
+    suspend fun continueTask(task: String, userImages: List<String> = emptyList()): StepResult {
         currentTask = task
         stepCount = 0
         recentActions.clear()
@@ -109,12 +117,14 @@ class PhoneAgent(
         consecutiveWaits = 0
         // Append the follow-up as a fresh user turn so adapters that key off
         // the last user message (AutoGLM, Qwen-VL, etc.) re-anchor on it.
+        // Note we do NOT inline userImages here — executeStep's buildMessages
+        // gets to interleave them with the next screenshot in one go.
         context.add(mapOf(
             "role" to "user",
             "content" to listOf(mapOf("type" to "text", "text" to "** 后续任务 **\n$task")),
         ))
         modelClient.adapter.addHistory("[用户追加] $task")
-        return executeStep(userPrompt = task, isFirst = false)
+        return executeStep(userPrompt = task, isFirst = false, userImages = userImages)
     }
 
     fun reset() {
@@ -129,6 +139,7 @@ class PhoneAgent(
     private suspend fun executeStep(
         userPrompt: String? = null,
         isFirst: Boolean = false,
+        userImages: List<String> = emptyList(),
     ): StepResult {
         stepCount++
 
@@ -150,6 +161,7 @@ class PhoneAgent(
             currentApp = currentApp,
             context = context,
             lang = agentConfig.lang,
+            extraUserImages = userImages,
         )
         context.clear()
         context.addAll(messages)

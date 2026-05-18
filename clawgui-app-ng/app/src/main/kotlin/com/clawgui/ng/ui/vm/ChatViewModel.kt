@@ -179,9 +179,10 @@ class ChatViewModel(
             val text = trigger.content
             val explicitGui = text.startsWith("/gui ") || text.startsWith("/操作 ")
             val toggleGui = RuntimeContainer.settings.guiModeEnabled.value
+            val userImages = encodeAttachmentsForVlm(trigger.attachments)
             if (explicitGui || toggleGui) {
                 val task = if (explicitGui) text.substringAfter(' ').trim() else text
-                runPhoneAgent(key, task)
+                runPhoneAgent(key, task, userImages)
             } else {
                 runBrainTurn(key)
             }
@@ -266,14 +267,26 @@ class ChatViewModel(
         runJob = viewModelScope.launch {
             val explicitGui = text.startsWith("/gui ") || text.startsWith("/操作 ")
             val toggleGui = RuntimeContainer.settings.guiModeEnabled.value
+            val userImages = encodeAttachmentsForVlm(staged)
             if (explicitGui || toggleGui) {
                 val task = if (explicitGui) text.substringAfter(' ').trim() else text
-                runPhoneAgent(key, task)
+                runPhoneAgent(key, task, userImages)
             } else {
                 runBrainTurn(key)
             }
             _isExecuting.value = false
         }
+    }
+
+    private suspend fun encodeAttachmentsForVlm(
+        atts: List<com.clawgui.ng.data.Attachment>,
+    ): List<String> = withContext(Dispatchers.IO) {
+        atts
+            .filter { it.kind == com.clawgui.ng.data.AttachmentKind.IMAGE }
+            .mapNotNull { att ->
+                com.clawgui.ng.runtime.media.AttachmentStore.readBytes(att.uri)
+                    ?.let { java.util.Base64.getEncoder().encodeToString(it) }
+            }
     }
 
     /**
@@ -282,8 +295,11 @@ class ChatViewModel(
      * user can expand it), and the dynamic island mirrors the same info.
      * The visible `content` is the running summary; on finish it becomes the
      * agent's final message.
+     *
+     * [userImages] are base64-encoded JPEGs the user attached to the chat
+     * turn — passed straight through to the VLM on the first step.
      */
-    private suspend fun runPhoneAgent(key: String, task: String) {
+    private suspend fun runPhoneAgent(key: String, task: String, userImages: List<String> = emptyList()) {
         // Device auth gate — either wireless-debug ADB OR Shizuku is enough.
         // We never auto-bind here: the user picks the path in 设置 → 设备控制授权
         // and any silent bind would flip the UI's "active" indicator behind
@@ -427,8 +443,8 @@ class ChatViewModel(
                     kotlinx.coroutines.withTimeout(5 * 60 * 1000L) {
                         withContext(Dispatchers.IO) {
                             when {
-                                stepIdx == 1 && isFollowUp -> agent.continueTask(task)
-                                stepIdx == 1 -> agent.step(task)
+                                stepIdx == 1 && isFollowUp -> agent.continueTask(task, userImages)
+                                stepIdx == 1 -> agent.step(task, userImages)
                                 else -> agent.step()
                             }
                         }

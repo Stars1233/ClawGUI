@@ -9,12 +9,25 @@ object MessageBuilder {
     fun createSystemMessage(content: String): Map<String, Any?> =
         mapOf("role" to "system", "content" to content)
 
-    fun createUserMessage(text: String, imageBase64: String? = null): Map<String, Any?> {
+    fun createUserMessage(
+        text: String,
+        imageBase64: String? = null,
+        extraUserImages: List<String> = emptyList(),
+    ): Map<String, Any?> {
         val content = mutableListOf<Map<String, Any?>>()
         if (imageBase64 != null) {
             content.add(mapOf(
                 "type" to "image_url",
                 "image_url" to mapOf("url" to "data:image/jpeg;base64,$imageBase64"),
+            ))
+        }
+        // User-supplied reference images carry a `#user-ref` URL fragment so
+        // removeImagesFromMessage() can strip the heavy per-step screenshot
+        // while keeping the user's reference around for the whole task.
+        extraUserImages.forEach { ref ->
+            content.add(mapOf(
+                "type" to "image_url",
+                "image_url" to mapOf("url" to "data:image/jpeg;base64,$ref#user-ref"),
             ))
         }
         content.add(mapOf("type" to "text", "text" to text))
@@ -33,7 +46,13 @@ object MessageBuilder {
     fun removeImagesFromMessage(message: Map<String, Any?>): Map<String, Any?> {
         val content = message["content"]
         if (content is List<*>) {
-            val filtered = content.filterIsInstance<Map<*, *>>().filter { it["type"] == "text" }
+            val filtered = content.filterIsInstance<Map<*, *>>().filter { part ->
+                if (part["type"] != "image_url") return@filter true
+                // Keep user-supplied reference images across steps so the
+                // model can keep grounding on them; drop only screenshots.
+                val url = (part["image_url"] as? Map<*, *>)?.get("url") as? String
+                url != null && url.endsWith("#user-ref")
+            }
             return message + mapOf("content" to filtered)
         }
         return message
@@ -69,15 +88,19 @@ object AutoGLMAdapter : ModelAdapter {
         currentApp: String,
         context: List<Map<String, Any?>>,
         lang: String,
+        extraUserImages: List<String>,
     ): List<Map<String, Any?>> {
         val messages = context.toMutableList()
         // step index = number of prior assistant turns already in context.
         val stepIndex = context.count { it["role"] == "assistant" } + 1
         if (messages.isEmpty()) {
             messages.add(MessageBuilder.createSystemMessage(PromptsZh.getSystemPrompt()))
+            val refHint = if (extraUserImages.isNotEmpty()) {
+                "\n用户随任务附带了 ${extraUserImages.size} 张参考图(显示在屏幕截图之后),需要把它们当作任务的输入材料(比如要发布的图片、要识别的内容)。\n"
+            } else ""
             val intro = """
                 用户任务(原话):$task
-
+                $refHint
                 请严格按系统提示的格式输出 `<think>...</think><answer>...</answer>`。
 
                 **首步特别要求**:`<think>` 的第 0 节"任务规约"必须显式拆出 4 行:
@@ -89,7 +112,7 @@ object AutoGLMAdapter : ModelAdapter {
 
                 屏幕信息:${MessageBuilder.buildScreenInfo(currentApp, stepIndex)}
             """.trimIndent()
-            messages.add(MessageBuilder.createUserMessage(intro, imageBase64))
+            messages.add(MessageBuilder.createUserMessage(intro, imageBase64, extraUserImages))
         } else {
             val screenInfo = MessageBuilder.buildScreenInfo(currentApp, stepIndex)
             val body = """
@@ -98,6 +121,9 @@ object AutoGLMAdapter : ModelAdapter {
 
                 请按系统提示的格式继续。`<think>` 第 0 节"任务规约"照抄首步写过的 4 行,第 1 节用规约里的 Done When 严格判断是否真的命中。
             """.trimIndent()
+            // Subsequent steps: never re-ship the user-ref images (they're
+            // already preserved in context by removeImagesFromMessage's
+            // user-ref carve-out), just the new screenshot + the prompt text.
             messages.add(MessageBuilder.createUserMessage(body, imageBase64))
         }
         return messages

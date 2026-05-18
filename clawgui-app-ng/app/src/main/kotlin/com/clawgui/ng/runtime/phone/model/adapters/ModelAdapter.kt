@@ -14,12 +14,23 @@ package com.clawgui.ng.runtime.phone.model.adapters
 interface ModelAdapter {
     val name: String
 
+    /**
+     * Build the messages payload for the VLM call.
+     *
+     * [extraUserImages] is a list of base64-encoded JPEGs the user attached
+     * to the chat turn (not the device screenshot). Adapters that support
+     * vision-array content blocks (AutoGLM, GLM-4.5V, Qwen-VL, ...) should
+     * interleave them alongside the screenshot on the first turn so the
+     * model can ground its plan on both the user's reference image *and*
+     * the current screen state. Defaults to empty for adapters that ignore.
+     */
     fun buildMessages(
         task: String,
         imageBase64: String,
         currentApp: String,
         context: List<Map<String, Any?>>,
         lang: String = "cn",
+        extraUserImages: List<String> = emptyList(),
     ): List<Map<String, Any?>>
 
     fun parseResponse(response: String): Pair<String, String>

@@ -29,6 +29,7 @@ class QwenVLAdapter : ModelAdapter {
         currentApp: String,
         context: List<Map<String, Any?>>,
         lang: String,
+        extraUserImages: List<String>,
     ): List<Map<String, Any?>> {
         // Qwen-VL 每轮重构,不沿用 context
         val messages = mutableListOf<Map<String, Any?>>()
@@ -41,18 +42,22 @@ class QwenVLAdapter : ModelAdapter {
             )
         )
         val userQuery = PromptsQwenVL.userQuery(task, history)
-        messages.add(
+        // Qwen rebuilds messages every turn so user-ref images are re-included
+        // here unconditionally (no need for the #user-ref carve-out trick).
+        val parts = mutableListOf<Map<String, Any?>>(
+            mapOf("type" to "text", "text" to userQuery),
             mapOf(
-                "role" to "user",
-                "content" to listOf(
-                    mapOf("type" to "text", "text" to userQuery),
-                    mapOf(
-                        "type" to "image_url",
-                        "image_url" to mapOf("url" to "data:image/jpeg;base64,$imageBase64"),
-                    ),
-                ),
-            )
+                "type" to "image_url",
+                "image_url" to mapOf("url" to "data:image/jpeg;base64,$imageBase64"),
+            ),
         )
+        extraUserImages.forEach { ref ->
+            parts.add(mapOf(
+                "type" to "image_url",
+                "image_url" to mapOf("url" to "data:image/jpeg;base64,$ref"),
+            ))
+        }
+        messages.add(mapOf("role" to "user", "content" to parts))
         return messages
     }
 

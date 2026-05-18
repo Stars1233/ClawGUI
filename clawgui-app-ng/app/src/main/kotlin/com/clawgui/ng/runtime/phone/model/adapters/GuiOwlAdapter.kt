@@ -28,7 +28,9 @@ class GuiOwlAdapter : ModelAdapter {
         currentApp: String,
         context: List<Map<String, Any?>>,
         lang: String,
+        extraUserImages: List<String>,
     ): List<Map<String, Any?>> {
+        @Suppress("UNUSED_VARIABLE") val ignoredRefs = extraUserImages
         val messages = mutableListOf<Map<String, Any?>>()
         messages.add(mapOf("role" to "system", "content" to PromptsGuiOwl.systemPrompt(lang)))
         val userQuery = PromptsGuiOwl.userQuery(task, history, lang)
