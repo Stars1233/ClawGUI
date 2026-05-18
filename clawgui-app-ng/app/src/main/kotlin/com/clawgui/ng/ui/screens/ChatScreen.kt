@@ -22,6 +22,9 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -46,6 +49,8 @@ fun ChatScreen(
     val header by vm.header.collectAsStateWithLifecycle()
     val guiMode by com.clawgui.ng.runtime.RuntimeContainer.settings.guiModeEnabled
         .collectAsStateWithLifecycle()
+    val pending by vm.pendingAttachments.collectAsStateWithLifecycle()
+    var showAttachSheet by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     LaunchedEffect(messages.size) {
@@ -74,6 +79,10 @@ fun ChatScreen(
                     .imePadding()
                     .windowInsetsPadding(WindowInsets.navigationBars),
             ) {
+                com.clawgui.ng.ui.components.PendingAttachmentsRow(
+                    attachments = pending,
+                    onRemove = vm::removePendingAttachment,
+                )
                 ChatInputBar(
                     value = draft,
                     onValueChange = vm::updateDraft,
@@ -85,9 +94,12 @@ fun ChatScreen(
                     onGuiModeChange = {
                         com.clawgui.ng.runtime.RuntimeContainer.settings.setGuiModeEnabled(it)
                     },
-                    onAttach = { /* TODO photo picker */ },
+                    // Both `+` and the inline 📷 button open the same sheet —
+                    // the sheet itself splits camera vs. gallery so a single
+                    // entry point keeps the discovery model simple.
+                    onAttach = { showAttachSheet = true },
                     onVoice = { /* TODO speech rec */ },
-                    onCamera = { /* TODO camera */ },
+                    onCamera = { showAttachSheet = true },
                     onModel = onOpenModelPicker,
                 )
             }
@@ -117,6 +129,13 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    if (showAttachSheet) {
+        com.clawgui.ng.ui.components.AttachmentPickerSheet(
+            onPicked = { uri -> vm.attachImage(uri) },
+            onDismiss = { showAttachSheet = false },
+        )
     }
 }
 

@@ -2,4 +2,7 @@
 <paths>
     <!-- Trace zip exports live in cacheDir/trace_exports — we share from there. -->
     <cache-path name="trace_exports" path="trace_exports/" />
+    <!-- Camera writes captures into cacheDir/camera_captures before we move
+         them into filesDir/attachments via AttachmentStore. -->
+    <cache-path name="camera_captures" path="camera_captures/" />
 </paths>

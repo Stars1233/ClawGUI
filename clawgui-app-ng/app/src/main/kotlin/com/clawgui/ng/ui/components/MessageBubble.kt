@@ -78,21 +78,43 @@ private fun UserBubble(m: ChatMessage) {
         horizontalArrangement = Arrangement.End,
     ) {
         Column(horizontalAlignment = Alignment.End) {
-            Surface(
-                shape = ClawCorners.bubbleUser,
-                color = androidx.compose.ui.graphics.Color.Transparent,
-                modifier = Modifier
-                    .widthIn(max = 320.dp)
-                    .clip(ClawCorners.bubbleUser)
-                    .background(brush)
-            ) {
-                androidx.compose.foundation.text.selection.SelectionContainer {
-                    Text(
-                        text = m.content,
-                        color = extras.userBubbleContent,
-                        style = MaterialTheme.typography.bodyLarge,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                    )
+            // Image attachments are rendered above the text in a tight grid so
+            // multi-image turns stay visually grouped with the message they
+            // belong to (rather than floating loose like Telegram).
+            val images = m.attachments.filter { it.kind == com.clawgui.ng.data.AttachmentKind.IMAGE }
+            if (images.isNotEmpty()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    images.take(3).forEach { att ->
+                        coil.compose.AsyncImage(
+                            model = java.io.File(att.uri),
+                            contentDescription = att.displayName,
+                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier
+                                .size(120.dp)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant),
+                        )
+                    }
+                }
+                if (m.content.isNotBlank()) Spacer(Modifier.height(6.dp))
+            }
+            if (m.content.isNotBlank()) {
+                Surface(
+                    shape = ClawCorners.bubbleUser,
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                    modifier = Modifier
+                        .widthIn(max = 320.dp)
+                        .clip(ClawCorners.bubbleUser)
+                        .background(brush)
+                ) {
+                    androidx.compose.foundation.text.selection.SelectionContainer {
+                        Text(
+                            text = m.content,
+                            color = extras.userBubbleContent,
+                            style = MaterialTheme.typography.bodyLarge,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                        )
+                    }
                 }
             }
         }
