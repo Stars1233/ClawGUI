@@ -122,15 +122,15 @@ object AutoGLMAdapter : ModelAdapter {
                   第 4 节 进度:`已完成 0/N`。
                   其余小节按系统提示走。
 
-                `<plan>` 必须有一个 `op: "init"` 把整个计划列出来,并且至少一个 `op: "update"` 把第 1 项标为 `IN_PROGRESS`。例子:
+                `<plan>` 必须有一个 `op: "init"` 把整个计划列出来,并且至少一个 `op: "update"` 把第 1 项标为 `IN_PROGRESS`。格式示意(任务内容请按用户原话替换,不要照抄"打开淘宝/找耳机"):
                 ```
                 <plan>{"ops":[
                   {"op":"init","items":[
-                    {"id":"open_wx","title":"打开微信"},
-                    {"id":"search","title":"搜索张三"},
-                    {"id":"send","title":"发送消息"}
+                    {"id":"open_shop","title":"打开淘宝"},
+                    {"id":"find","title":"找想要的耳机"},
+                    {"id":"buy","title":"下单"}
                   ]},
-                  {"op":"update","id":"open_wx","status":"IN_PROGRESS"}
+                  {"op":"update","id":"open_shop","status":"IN_PROGRESS"}
                 ]}</plan>
                 ```
 
