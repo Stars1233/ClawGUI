@@ -615,8 +615,8 @@ class ChatViewModel(
      */
     private suspend fun runBrainTurn(key: String) {
         val brainId = RuntimeContainer.settings.activeBrain.value
-        val cred = RuntimeContainer.settings.resolveCredentials(brainId)
-        if (cred == null || cred.apiKey.isBlank()) {
+        val brainCred = RuntimeContainer.settings.resolveCredentials(brainId)
+        if (brainCred == null || brainCred.apiKey.isBlank()) {
             sessions.updateLastMessage(key) {
                 it.copy(
                     content = "尚未配置 ${brainId} 的 API Key。\n\n请到「设置 → AI 模型」粘贴你的智谱 API Key,然后再次发送。",
@@ -627,14 +627,43 @@ class ChatViewModel(
             return
         }
 
+        // If the latest user message has images but the configured Brain can't
+        // see, fall back to the active Vision provider for this turn (it's an
+        // OpenAI-compatible VLM and answers free-form prompts fine when not
+        // looking at a phone screenshot). User → 设置 → AI 模型 controls both.
+        val historyFull = sessions.messagesFor(key).value.dropLast(1)
+        val lastUser = historyFull.lastOrNull { it.role == Role.USER }
+        val hasUserImages = lastUser?.attachments?.any {
+            it.kind == com.clawgui.ng.data.AttachmentKind.IMAGE
+        } == true
+
+        val (cred, fellBack) = if (hasUserImages && !brainCred.supportsVision) {
+            val visionId = RuntimeContainer.settings.activeVision.value
+            val visionCred = RuntimeContainer.settings.resolveCredentials(visionId)
+            if (visionCred != null && visionCred.apiKey.isNotBlank() && visionCred.supportsVision) {
+                android.util.Log.i("ChatVM", "Brain $brainId can't see images — falling back to $visionId for this turn")
+                visionCred to true
+            } else {
+                brainCred to false
+            }
+        } else {
+            brainCred to false
+        }
+
         RuntimeContainer.publishExecution(
-            ExecutionStatus(state = ExecutionState.THINKING, title = "正在思考", subtitle = cred.model)
+            ExecutionStatus(
+                state = ExecutionState.THINKING,
+                title = if (fellBack) "调用视觉模型" else "正在思考",
+                subtitle = cred.model,
+            )
         )
 
         val brain = BrainRuntime(cred)
-        val history = sessions.messagesFor(key).value
-            .dropLast(1)            // drop empty placeholder
-        val system = "你是 ClawGUI 的对话大脑。回答简洁清楚,中文优先。当用户希望你帮助操作手机时,先做计划再行动。"
+        val history = historyFull
+        val baseSystem = "你是 ClawGUI 的对话大脑。回答简洁清楚,中文优先。当用户希望你帮助操作手机时,先做计划再行动。"
+        val system = if (fellBack) {
+            "$baseSystem\n用户附了图片在最后一条消息里,请按用户要求基于图片内容作答。"
+        } else baseSystem
         val acc = StringBuilder()
 
         try {
