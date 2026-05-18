@@ -44,6 +44,12 @@ jobs:
         with:
           gradle-home-cache-cleanup: true
 
+      # Belt + braces — the git index now stores gradlew as 100755, but if a
+      # future contributor unpacks the repo on Windows the exec bit can get
+      # lost; explicitly restore it before invoking.
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
       - name: Show toolchain
         run: |
           java -version
