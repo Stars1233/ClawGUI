@@ -97,6 +97,9 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.8.1")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     implementation("androidx.datastore:datastore-preferences:1.0.0")
+    // EXIF reader so phone-photo portrait orientation doesn't render sideways
+    // after we re-encode for chat attachments.
+    implementation("androidx.exifinterface:exifinterface:1.3.7")
 
     // Compose
     implementation(platform("androidx.compose:compose-bom:2023.10.01"))

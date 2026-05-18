@@ -56,6 +56,11 @@ class ChatViewModel(
     private val _draft = MutableStateFlow("")
     val draft: StateFlow<String> = _draft
 
+    /** Images the user has attached but not yet sent. Cleared on send / cancel.
+     *  Capped at MAX_ATTACHMENTS to keep the upload + VLM token cost bounded. */
+    private val _pendingAttachments = MutableStateFlow<List<com.clawgui.ng.data.Attachment>>(emptyList())
+    val pendingAttachments: StateFlow<List<com.clawgui.ng.data.Attachment>> = _pendingAttachments
+
     private val _isExecuting = MutableStateFlow(false)
     val isExecuting: StateFlow<Boolean> = _isExecuting
 
@@ -87,6 +92,54 @@ class ChatViewModel(
     }.stateIn(viewModelScope, SharingStarted.Eagerly, HeaderState("ClawGUI", "GLM-5.1"))
 
     fun updateDraft(text: String) { _draft.value = text }
+
+    /**
+     * Persist a freshly-picked image into the app sandbox and stage it as a
+     * pending attachment. Silently no-ops past [MAX_ATTACHMENTS] (UI grays the
+     * picker out at that point). Runs the disk copy on IO.
+     */
+    fun attachImage(uri: android.net.Uri) {
+        if (_pendingAttachments.value.size >= MAX_ATTACHMENTS) return
+        viewModelScope.launch {
+            val path = withContext(Dispatchers.IO) {
+                com.clawgui.ng.runtime.media.AttachmentStore.saveImage(
+                    RuntimeContainer.appContext, uri
+                )
+            } ?: return@launch
+            val display = uri.lastPathSegment?.substringAfterLast('/')?.take(40) ?: "图片"
+            val att = com.clawgui.ng.data.Attachment(
+                id = "att_" + UUID.randomUUID().toString().take(8),
+                kind = com.clawgui.ng.data.AttachmentKind.IMAGE,
+                uri = path,
+                displayName = display,
+                sizeBytes = java.io.File(path).length(),
+            )
+            _pendingAttachments.value = _pendingAttachments.value + att
+        }
+    }
+
+    fun removePendingAttachment(id: String) {
+        val keep = mutableListOf<com.clawgui.ng.data.Attachment>()
+        _pendingAttachments.value.forEach {
+            if (it.id == id) {
+                runCatching { com.clawgui.ng.runtime.media.AttachmentStore.delete(it.uri) }
+            } else keep += it
+        }
+        _pendingAttachments.value = keep
+    }
+
+    fun clearPendingAttachments() {
+        // Drop staged files from disk too — they were only valid for the
+        // not-yet-sent draft and would otherwise leak.
+        _pendingAttachments.value.forEach {
+            runCatching { com.clawgui.ng.runtime.media.AttachmentStore.delete(it.uri) }
+        }
+        _pendingAttachments.value = emptyList()
+    }
+
+    companion object {
+        const val MAX_ATTACHMENTS = 3
+    }
 
     fun selectSession(key: String) = sessions.selectSession(key)
     fun newSession(): String {
@@ -183,14 +236,20 @@ class ChatViewModel(
 
     fun send() {
         val text = _draft.value.trim()
-        if (text.isEmpty() || _isExecuting.value) return
+        val staged = _pendingAttachments.value
+        // Allow sending image-only ("describe this") with empty text.
+        if ((text.isEmpty() && staged.isEmpty()) || _isExecuting.value) return
         _draft.value = ""
+        // Move staged → message; don't run clearPendingAttachments() — that
+        // would delete the underlying files we just attached.
+        _pendingAttachments.value = emptyList()
 
         val key = sessions.currentKey.value
         val userMsg = ChatMessage(
             id = "msg_" + UUID.randomUUID().toString().take(8),
             role = Role.USER,
             content = text,
+            attachments = staged,
         )
         sessions.appendMessage(key, userMsg)
         maybeAutoTitle(key, text)
