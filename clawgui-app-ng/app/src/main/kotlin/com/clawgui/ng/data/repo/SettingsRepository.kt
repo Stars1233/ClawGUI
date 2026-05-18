@@ -240,4 +240,40 @@ data class ProviderCredentials(
     val baseUrl: String,
     val model: String,
     val apiKey: String,
-)
+) {
+    /**
+     * Heuristic: does this Brain model support image inputs? Used to decide
+     * whether to ship the user's attached images alongside their text or to
+     * route the turn to the VLM instead.
+     *
+     * Inferred from the model name rather than stored as a settings field so
+     * users who change the model string (e.g. `glm-4.5` → `glm-4.5v`) flip
+     * the capability automatically without re-touching settings. Override
+     * with a stored toggle later if this proves too coarse.
+     */
+    val supportsVision: Boolean
+        get() {
+            val m = model.lowercase()
+            // Conservative deny-list first — text-only models we explicitly
+            // know cannot see images (so a model name like `glm-5.1-pro`
+            // doesn't accidentally match the `vl` substring inside another word).
+            val textOnly = listOf(
+                "glm-4-",
+                "glm-4.5-",
+                "glm-5.0",
+                "glm-5.1",
+                "gpt-3.5",
+                "gpt-4-turbo", // text-only variants
+            )
+            if (textOnly.any { m.startsWith(it) }) return false
+
+            // Known vision families.
+            val vision = listOf(
+                "vision", "vl", "-v", "4o", "4.1", "5o",
+                "gemini", "gpt-4o", "gpt-5",
+                "claude-3", "claude-opus", "claude-sonnet", "claude-haiku",
+                "autoglm",
+            )
+            return vision.any { m.contains(it) }
+        }
+}

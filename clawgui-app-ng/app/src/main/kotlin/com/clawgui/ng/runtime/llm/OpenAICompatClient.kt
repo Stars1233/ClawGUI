@@ -140,11 +140,66 @@ class OpenAICompatClient(
     }
 }
 
-/** A chat message understood by both the OpenAI- and ZhiPu-compatible APIs. */
-data class Message(val role: String, val content: String) {
+/**
+ * A chat message understood by both the OpenAI- and ZhiPu-compatible APIs.
+ *
+ * For text-only turns the convenience [Message] String constructor builds a
+ * plain `{"role": ..., "content": "..."}` object. For multimodal turns
+ * (user-supplied images), construct with a list of [ContentPart] and the
+ * client emits the OpenAI vision format:
+ *
+ * ```
+ * {
+ *   "role": "user",
+ *   "content": [
+ *     {"type": "text",      "text": "..."},
+ *     {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+ *   ]
+ * }
+ * ```
+ *
+ * Provider compatibility: 智谱 GLM-4.5V / GLM-5V, OpenAI gpt-4o, Qwen-VL all
+ * accept this exact shape. Models without vision will 400 or silently ignore
+ * the image parts — gated by `ProviderProfile.supportsVision` upstream.
+ */
+data class Message(val role: String, val parts: List<ContentPart>) {
+    /** Convenience for plain-text messages (no attachments). */
+    constructor(role: String, text: String) : this(role, listOf(ContentPart.Text(text)))
+
     fun toJson(): JsonObject = buildJsonObject {
         put("role", role)
-        put("content", content)
+        // Text-only single-part stays as a plain string for maximum backend
+        // compatibility (some OpenAI-compat endpoints reject the array form
+        // for system / assistant messages even though OpenAI itself accepts it).
+        val onlyText = parts.singleOrNull() as? ContentPart.Text
+        if (onlyText != null) {
+            put("content", onlyText.text)
+        } else {
+            put("content", buildJsonArray {
+                parts.forEach { add(it.toJson()) }
+            })
+        }
+    }
+}
+
+sealed interface ContentPart {
+    fun toJson(): JsonObject
+
+    data class Text(val text: String) : ContentPart {
+        override fun toJson(): JsonObject = buildJsonObject {
+            put("type", "text")
+            put("text", text)
+        }
+    }
+
+    /** Base64-encoded image bytes (no `data:` prefix needed from caller). */
+    data class ImageBase64(val base64: String, val mime: String = "image/jpeg") : ContentPart {
+        override fun toJson(): JsonObject = buildJsonObject {
+            put("type", "image_url")
+            put("image_url", buildJsonObject {
+                put("url", "data:$mime;base64,$base64")
+            })
+        }
     }
 }
 

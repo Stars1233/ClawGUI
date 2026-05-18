@@ -1,10 +1,10 @@
 package com.clawgui.ng.runtime.llm
 
+import com.clawgui.ng.data.AttachmentKind
 import com.clawgui.ng.data.ChatMessage
 import com.clawgui.ng.data.Role
 import com.clawgui.ng.data.repo.ProviderCredentials
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flow
 
 /**
@@ -12,6 +12,12 @@ import kotlinx.coroutines.flow.flow
  * based on credentials' kind and streams reply tokens. The contract is just
  * tokens (no thinking/tool calls yet); higher-level event types are layered
  * on top by AgentRuntime when PhoneAgent is wired in.
+ *
+ * Multimodal: when a USER message in history carries IMAGE attachments and
+ * the provider is marked `supportsVision`, the images are encoded as base64
+ * and sent alongside the text in OpenAI vision-content-array form. Providers
+ * without vision drop the images silently and only the text reaches the API
+ * (gated by the caller).
  */
 class BrainRuntime(private val credentials: ProviderCredentials) {
 
@@ -34,9 +40,41 @@ class BrainRuntime(private val credentials: ProviderCredentials) {
                     Role.SYSTEM -> "system"
                     Role.TOOL -> "tool"
                 }
-                if (m.content.isNotBlank()) add(Message(role, m.content))
+                val msg = toMessage(role, m) ?: return@forEach
+                add(msg)
             }
         }
         client.stream(messages).collect { emit(it) }
+    }
+
+    /**
+     * Convert a stored [ChatMessage] into an API-bound [Message]. Returns
+     * null when the message has no content at all (placeholder rows we should
+     * skip). User images are encoded only when the provider supports vision —
+     * for text-only providers we send the text alone so chat history stays
+     * coherent.
+     */
+    private fun toMessage(role: String, m: ChatMessage): Message? {
+        val images = if (role == "user" && credentials.supportsVision) {
+            m.attachments
+                .filter { it.kind == AttachmentKind.IMAGE }
+                .mapNotNull { att ->
+                    com.clawgui.ng.runtime.media.AttachmentStore.readBytes(att.uri)
+                        ?.let { java.util.Base64.getEncoder().encodeToString(it) }
+                }
+        } else emptyList()
+
+        val hasText = m.content.isNotBlank()
+        if (!hasText && images.isEmpty()) return null
+
+        if (images.isEmpty()) return Message(role, m.content)
+
+        // Vision turn — interleave text + images. Text first so the model
+        // grounds before scanning the picture.
+        val parts = buildList {
+            if (hasText) add(ContentPart.Text(m.content))
+            images.forEach { add(ContentPart.ImageBase64(it)) }
+        }
+        return Message(role, parts)
     }
 }
