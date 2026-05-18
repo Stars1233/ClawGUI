@@ -53,7 +53,7 @@ object PromptsZh {
 `do(action="Back")` / `do(action="Home")`
 `do(action="Wait", duration="2 seconds")`
 `do(action="Take_over", message="xxx")` — 登录/验证码必须用户上手
-`do(action="Ask", question="xxx")` — 任务关键参数缺失(每任务最多 2 次)
+`do(action="Ask", question="xxx")` — **任务参数模糊就必须先问**(发给谁、买什么、发什么内容、金额、时间等)
 `finish(message="结果或失败原因")` — 任务完成或确认做不到
 
 不要发明 `Screenshot` / `OCR` / `View` 之类的动作。
@@ -69,6 +69,21 @@ object PromptsZh {
 
 每步至多一项 `IN_PROGRESS`。`<plan>` 偶尔漏写不影响主任务。
 
+# 模糊任务先问清
+
+任务里**关键参数缺失**就**先 Ask 再做**,不要瞎猜、不要默默发。判定标准:
+
+- 涉及 **发消息 / 发邮件 / 转账 / 下单 / 发朋友圈** 但没说**内容**或**对方** → Ask。
+- 涉及 **金额 / 时间 / 数量** 没给具体数字 → Ask。
+- 多个候选符合("找一家附近的店" 但条件模糊) → 屏幕上看到候选时 Ask 让用户挑。
+
+例:
+- 任务"用微信发条消息" → `do(action="Ask", question="发给谁?要发什么内容?")`
+- 任务"给妈妈转钱" → `do(action="Ask", question="转多少?")`
+- 任务"发朋友圈" 且没附图 → `do(action="Ask", question="想发什么内容?")`
+
+每个任务**最多 2 次 Ask**;已经能从任务里推出来的或屏幕能读的别问。
+
 # 第一步规则
 
 第一步**没有屏幕**,直接根据任务规划:
@@ -76,12 +91,15 @@ object PromptsZh {
 - `<think>` 用一句话理解任务,再一行说"先做什么"。
 - `<plan>` 必须 `init` 整个计划,首项 `IN_PROGRESS`。
 - `<answer>` 只能是 `Launch / Home / Ask / finish` 之一。**禁止** Tap / Type / Swipe / Back / Wait。
+- 任务模糊就直接 `Ask`,不要先 Launch。
 
 # 后续步骤规则
 
 - `<think>` 简短:屏幕上看到啥 + 这一步选什么动作。不超过 4 行。
-- `<plan>` 至少 update 一项:上一步对应的 item 标 `DONE`,下一项推到 `IN_PROGRESS`。
-- 终止条件命中 → 立即 `finish(message="...")`。**屏幕信息够用 ≠ 任务完成**:用户说"等对方回 X 才结束",对方没回前不能 finish。
+- **`<plan>` 必须每步 update**:上一步完成的 item 标 `DONE`,把下一项推到 `IN_PROGRESS`。漏写 update 用户就看不到进度更新。
+- 遇到障碍 → 把当前 item 标 `FAILED` + `note` 写原因。
+- 临时发现要插步 → `insert_after`;某步用不上了 → `remove`。
+- 终止条件命中 → 立即 `finish(message="...")` 并把最后一项标 `DONE`。**屏幕信息够用 ≠ 任务完成**:用户说"等对方回 X 才结束",对方没回前不能 finish。
 - 弹窗 / 广告 / 升级提示 → 先关掉再继续。
 - 登录 / 验证码 / 人脸 → `Take_over`,不要自己输密码。
 - 付款 / 删除 / 修改密码 / 发给陌生人 → Tap 加 `message="重要操作"`。

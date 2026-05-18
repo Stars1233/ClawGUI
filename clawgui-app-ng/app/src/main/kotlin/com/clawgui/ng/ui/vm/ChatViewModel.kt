@@ -591,7 +591,7 @@ class ChatViewModel(
 
         try {
             sessions.updateLastMessage(key) {
-                it.copy(content = "正在分析任务并截屏…", thinking = "")
+                it.copy(content = "正在规划任务…", thinking = "")
             }
             while (true) {
                 stepIdx++
@@ -727,6 +727,14 @@ class ChatViewModel(
                     imeCtrl.switchTo(origIme)
                 }
             }
+            // Always return the user to the ClawGUI chat — success, error,
+            // cancel, all paths. The finally block guarantees it even when
+            // the coroutine was cancelled mid-step (user pressed Stop). The
+            // foreground service we acquired up top grants background
+            // activity-start on Android 12+ ROMs that honour spec; Honor /
+            // MagicOS still ignores it sometimes, in which case the
+            // execution-state notification's content-intent is the fallback.
+            runCatching { bringClawGuiToFront() }
         }
 
         sessions.updateLastMessage(key) {
@@ -756,22 +764,8 @@ class ChatViewModel(
                 RuntimeContainer.feishu.reply(chatId, finalMessage!!, lastMsgId)
             }
         }
-        // Bring ClawGUI to the foreground so the user is dropped back into the
-        // chat with the result. The foreground service we acquired earlier
-        // grants us the background-Activity-start privilege Android 12+
-        // would otherwise deny.
-        runCatching {
-            val ctx = RuntimeContainer.appContext
-            val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
-            if (launch != null) {
-                launch.addFlags(
-                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK
-                        or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
-                        or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
-                )
-                ctx.startActivity(launch)
-            }
-        }
+        // (Bring-to-front happens unconditionally inside the finally above
+        // so we don't miss the cancellation / error paths.)
         // Let the user see the final notification for a beat before we tear
         // the service down — quick-flash "done" is invisible.
         delay(5000)
@@ -800,6 +794,36 @@ class ChatViewModel(
             acquire(10 * 60 * 1000L)
         }
     }.getOrNull()
+
+    /**
+     * Foreground the ClawGUI MainActivity so the user lands back on the chat
+     * after the agent finishes / errors / is cancelled. Belt-and-braces:
+     *   1. Direct startActivity with NEW_TASK + REORDER_TO_FRONT — works on
+     *      stock Android 12+ thanks to the foreground service.
+     *   2. PendingIntent.send() fallback — survives some OEM
+     *      background-activity-start restrictions (Honor MagicOS, MIUI)
+     *      that ignore the direct path even with FGS.
+     */
+    private fun bringClawGuiToFront() {
+        val ctx = RuntimeContainer.appContext
+        val launch = ctx.packageManager.getLaunchIntentForPackage(ctx.packageName)
+            ?: return
+        launch.addFlags(
+            android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                or android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+                or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP,
+        )
+        runCatching { ctx.startActivity(launch) }
+        runCatching {
+            val pi = android.app.PendingIntent.getActivity(
+                ctx, 0, launch,
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or
+                    android.app.PendingIntent.FLAG_IMMUTABLE,
+            )
+            pi.send()
+        }
+    }
 
     private fun describeActionInline(action: Map<String, Any?>): String {
         val name = action["action"] as? String
