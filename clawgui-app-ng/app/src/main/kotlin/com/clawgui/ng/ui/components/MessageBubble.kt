@@ -80,6 +80,10 @@ fun MessageBubble(
 private fun UserBubble(m: ChatMessage) {
     val extras = ClawTheme.extras
     val brush = Brush.linearGradient(listOf(extras.gradientStart, extras.gradientEnd))
+    // Open path (or null = closed) of the lightbox. Set when user taps a
+    // thumbnail; the dialog dismisses by tapping outside or the × button.
+    var preview by remember { mutableStateOf<String?>(null) }
+
     Row(
         Modifier.fillMaxWidth().padding(start = 56.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
         horizontalArrangement = Arrangement.End,
@@ -90,17 +94,26 @@ private fun UserBubble(m: ChatMessage) {
             // belong to (rather than floating loose like Telegram).
             val images = m.attachments.filter { it.kind == com.clawgui.ng.data.AttachmentKind.IMAGE }
             if (images.isNotEmpty()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Dynamic tile size: 1 image → big (180), 2-3 → small (110) so
+                // multi-image rows stay within the bubble width budget.
+                val tileSize = if (images.size == 1) 180.dp else 110.dp
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     images.take(3).forEach { att ->
-                        coil.compose.AsyncImage(
-                            model = java.io.File(att.uri),
-                            contentDescription = att.displayName,
-                            contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            tonalElevation = 0.dp,
                             modifier = Modifier
-                                .size(120.dp)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(MaterialTheme.colorScheme.surfaceVariant),
-                        )
+                                .size(tileSize)
+                                .clickable { preview = att.uri },
+                        ) {
+                            coil.compose.AsyncImage(
+                                model = java.io.File(att.uri),
+                                contentDescription = att.displayName,
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                                modifier = Modifier.size(tileSize),
+                            )
+                        }
                     }
                 }
                 if (m.content.isNotBlank()) Spacer(Modifier.height(6.dp))
@@ -125,6 +138,10 @@ private fun UserBubble(m: ChatMessage) {
                 }
             }
         }
+    }
+
+    preview?.let { path ->
+        ImageLightbox(filePath = path, onDismiss = { preview = null })
     }
 }
 
