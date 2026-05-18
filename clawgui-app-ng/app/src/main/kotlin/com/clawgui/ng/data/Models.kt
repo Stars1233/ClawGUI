@@ -21,6 +21,22 @@ data class ChatMessage(
     /** PhoneAgent 制定的多步骤计划。null = 该消息没有计划(普通对话);
      *  非 null 时 UI 会在 bubble 里渲染计划卡。状态变化时整张 Plan 替换。 */
     val plan: Plan? = null,
+    /** PhoneAgent 每步的动作记录,UI 用来渲染执行轨迹时间轴。 */
+    val actionTrace: List<StepRecord> = emptyList(),
+)
+
+@Serializable
+data class StepRecord(
+    val stepIndex: Int,
+    /** Action name like "Tap" / "Launch" / "Type" / "finish". */
+    val actionName: String,
+    /** Inline detail (coords / text / app name) for compact one-line display. */
+    val actionExtra: String = "",
+    /** First non-blank line of the model's <think> for this step — 1-line preview. */
+    val thinkingPreview: String = "",
+    val success: Boolean = true,
+    /** True while the action is mid-execution; UI shows a spinner instead of ✓/✗. */
+    val inProgress: Boolean = false,
 )
 
 @Serializable

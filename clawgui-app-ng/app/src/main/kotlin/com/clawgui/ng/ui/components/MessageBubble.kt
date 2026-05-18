@@ -160,11 +160,16 @@ private fun AssistantBubble(
         AssistantAvatar(size = 30)
         Spacer(Modifier.width(10.dp))
         Column(Modifier.weight(1f)) {
-            // Plan sits *above* the thinking panel so the user's eye lands
-            // on the structured progress first — thinking goes below as
-            // supplementary context they can expand if curious.
+            // Three stacked panels (top→bottom): structured plan, live
+            // action trace, and the model's per-step thinking. All three
+            // hide gracefully when their data source is empty so plain
+            // chat bubbles stay clean.
             m.plan?.takeIf { it.items.isNotEmpty() }?.let { plan ->
                 PlanCard(plan)
+                Spacer(Modifier.height(6.dp))
+            }
+            if (m.actionTrace.isNotEmpty() || (m.streaming && m.plan != null)) {
+                ActionTraceList(trace = m.actionTrace, streaming = m.streaming)
                 Spacer(Modifier.height(6.dp))
             }
             if (!m.thinking.isNullOrBlank()) {

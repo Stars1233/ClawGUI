@@ -585,6 +585,10 @@ class ChatViewModel(
         // null and stays null if the model never emits an `<plan>` block —
         // chat falls back to plain-text bubble + thinking panel only.
         var runningPlan: com.clawgui.ng.data.Plan? = null
+        // Running action trace: one StepRecord per PhoneAgent step. Snapshot
+        // into the assistant message every iteration so the chat-side
+        // ActionTraceList ticks in real time.
+        val trace = mutableListOf<com.clawgui.ng.data.StepRecord>()
         // No hard cap — agent runs until it finishes, you stop it, or stuck-detection bails.
         var finalMessage: String? = null
         var stepIdx = 0
@@ -635,11 +639,25 @@ class ChatViewModel(
                     stepIndex = stepIdx,
                 )
 
+                trace.add(com.clawgui.ng.data.StepRecord(
+                    stepIndex = stepIdx,
+                    actionName = actionName,
+                    actionExtra = actionExtra,
+                    thinkingPreview = step.thinking
+                        .lineSequence()
+                        .firstOrNull { it.isNotBlank() }
+                        .orEmpty()
+                        .take(120),
+                    success = step.success,
+                    inProgress = false,
+                ))
+
                 sessions.updateLastMessage(key) {
                     it.copy(
                         content = "正在执行第 $stepIdx 步:$actionName${if (actionExtra.isNotBlank()) " · $actionExtra" else ""}",
                         thinking = thinkingLog.toString(),
                         plan = runningPlan,
+                        actionTrace = trace.toList(),
                     )
                 }
                 RuntimeContainer.publishExecution(
@@ -742,6 +760,7 @@ class ChatViewModel(
                 content = finalMessage ?: "任务结束",
                 thinking = thinkingLog.toString(),
                 plan = runningPlan,
+                actionTrace = trace.toList(),
                 streaming = false,
             )
         }
