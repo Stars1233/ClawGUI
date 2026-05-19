@@ -65,16 +65,23 @@ object AutoGLMAdapter : ModelAdapter {
 
     override fun parseResponse(response: String): Pair<String, String> {
         // The XML-style structured form is the contract — try it first.
-        // Splitting on bare `do(action=` / `finish(message=` would otherwise
-        // grab the *first* occurrence anywhere in the response, including
-        // examples the model quotes inside <think>.
-        if ("<answer>" in response) {
-            val parts = response.split("<answer>", limit = 2)
-            val rawThink = parts[0]
+        // Use the *last* `<answer>` so any earlier ones the model quoted as
+        // examples inside <think> can't shadow the real action; pick the
+        // *first* `</answer>` after it so trailing junk (extra `<plan>`,
+        // stray tokens, repeated answer blocks) doesn't get glued to the
+        // action string.
+        val openIdx = response.lastIndexOf("<answer>")
+        if (openIdx >= 0) {
+            val afterOpen = openIdx + "<answer>".length
+            val closeIdx = response.indexOf("</answer>", afterOpen)
+            val rawAction = if (closeIdx > 0)
+                response.substring(afterOpen, closeIdx)
+            else
+                response.substring(afterOpen)
+            val rawThink = response.substring(0, openIdx)
                 .replace("<think>", "").replace("</think>", "").trim()
             val thinking = cleanThinking(rawThink)
-            val action = parts[1].replace("</answer>", "").trim()
-            return thinking to action
+            return thinking to sanitizeActionString(rawAction)
         }
         // Fallbacks for models that drop the XML wrappers entirely. Use the
         // *last* occurrence so any quoted examples in the lead-in can't
@@ -82,12 +89,12 @@ object AutoGLMAdapter : ModelAdapter {
         val finishIdx = response.lastIndexOf("finish(message=")
         if (finishIdx >= 0) {
             return cleanThinking(response.substring(0, finishIdx).trim()) to
-                response.substring(finishIdx)
+                sanitizeActionString(response.substring(finishIdx))
         }
         val doIdx = response.lastIndexOf("do(action=")
         if (doIdx >= 0) {
             return cleanThinking(response.substring(0, doIdx).trim()) to
-                response.substring(doIdx)
+                sanitizeActionString(response.substring(doIdx))
         }
         // Model went fully free-form — no XML, no command. Don't pretend
         // there's an action. Surface a synthetic finish so the loop bails
@@ -95,6 +102,75 @@ object AutoGLMAdapter : ModelAdapter {
         // looping while ActionParser fails over and over.
         val cleaned = cleanThinking(response).take(400).ifBlank { "模型没有按要求的格式输出。" }
         return cleaned to "finish(message=\"模型未按格式输出。原文摘要:${cleaned.take(120)}\")"
+    }
+
+    /**
+     * Normalise a raw `<answer>` body before ActionParser sees it. Handles
+     * the common ways model output strays from the contract:
+     *   - Markdown code fences (```python ... ```)
+     *   - Stray <plan>/<answer> tags glued on at the end
+     *   - Extra wrapping quotes ("do(...)")
+     *   - Smart / full-width punctuation that ActionParser doesn't grok
+     *     (Chinese brackets 【】 「」, smart quotes “”‘’, full-width =,)
+     *   - Leading natural-language prefix before the actual command
+     *   - Trailing junk after the matching close paren
+     */
+    private fun sanitizeActionString(raw: String): String {
+        var s = raw.trim()
+            // Code fences
+            .replace("```python", "").replace("```kotlin", "").replace("```json", "").replace("```", "")
+            // Stray XML wrappers
+            .replace("</answer>", "").replace("<answer>", "")
+            .replace(Regex("<plan>.*?</plan>", RegexOption.DOT_MATCHES_ALL), "")
+            .replace("<plan>", "").replace("</plan>", "")
+            .replace("<think>", "").replace("</think>", "")
+            // Full-width / smart punctuation → ASCII equivalents.
+            // Chars below are full-width / curly variants, NOT their ASCII twins.
+            .replace('\u3010', '[').replace('\u3011', ']')           // 【】
+            .replace('\uFF08', '(').replace('\uFF09', ')')           // ()
+            .replace('\u300C', '"').replace('\u300D', '"')           // 「」
+            .replace('\u201C', '"').replace('\u201D', '"')           // “”
+            .replace('\u2018', '\'').replace('\u2019', '\'')         // ‘’
+            .replace('\uFF1D', '=').replace('\uFF0C', ',')           // =,
+            .trim()
+        // Strip extra wrapping quotes the model occasionally adds.
+        if ((s.startsWith("\"") && s.endsWith("\"")) ||
+            (s.startsWith("'") && s.endsWith("'"))
+        ) {
+            s = s.substring(1, s.length - 1).trim()
+        }
+        // Drop leading natural-language preamble before the command token.
+        val doIdx = s.indexOf("do(")
+        val finIdx = s.indexOf("finish(")
+        val firstCmd = when {
+            doIdx < 0 -> finIdx
+            finIdx < 0 -> doIdx
+            else -> minOf(doIdx, finIdx)
+        }
+        if (firstCmd > 0) s = s.substring(firstCmd)
+        // Drop trailing junk after the *matching* close paren of the first
+        // top-level call. We balance depth respecting string literals so
+        // commas/parens inside text="..." don't trip us up.
+        if (s.startsWith("do(") || s.startsWith("finish(")) {
+            val openParen = s.indexOf('(')
+            var depth = 0
+            var inStr = false
+            var strChar = ' '
+            for (i in openParen until s.length) {
+                val c = s[i]
+                if (inStr) {
+                    if (c == strChar && (i == 0 || s[i - 1] != '\\')) inStr = false
+                } else when (c) {
+                    '"', '\'' -> { inStr = true; strChar = c }
+                    '(' -> depth++
+                    ')' -> {
+                        depth--
+                        if (depth == 0) { s = s.substring(0, i + 1); break }
+                    }
+                }
+            }
+        }
+        return s.trim()
     }
 
     /**
