@@ -168,11 +168,16 @@ private fun AssistantBubble(
                 PlanCard(plan)
                 Spacer(Modifier.height(6.dp))
             }
+            val isGuiTask = m.plan != null || m.actionTrace.isNotEmpty()
             if (m.actionTrace.isNotEmpty() || (m.streaming && m.plan != null)) {
                 ActionTraceList(trace = m.actionTrace, streaming = m.streaming)
                 Spacer(Modifier.height(6.dp))
             }
-            if (!m.thinking.isNullOrBlank()) {
+            // Thinking panel only shows for plain Brain replies — for
+            // PhoneAgent runs the per-step thinking is already surfaced
+            // inside ActionTraceList's row-peek, so the global log here is
+            // duplicate noise.
+            if (!isGuiTask && !m.thinking.isNullOrBlank()) {
                 ThinkingPanel(m.thinking, streaming = m.streaming && m.content.isBlank())
                 Spacer(Modifier.height(6.dp))
             }
